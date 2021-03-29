@@ -1,0 +1,13 @@
+{
+    "name": "clean-up-gh-packages",
+    "version": "0.0.1",
+    "description": "A GitHub Action that enables to clean up older package versions",
+    "main": "index.js",
+    "scripts": {},
+    "keywords": [],
+    "author": "",
+    "dependencies": {
+        "@actions/core": "^1.2.6",
+        "@octokit/core": "^3.3.1"
+    }
+}
