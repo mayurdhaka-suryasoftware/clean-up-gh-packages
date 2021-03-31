@@ -9,6 +9,7 @@ const { Octokit } = __nccwpck_require__(461);
 const core = __nccwpck_require__(127);
 const { request } = __nccwpck_require__(986);
 const { withCustomRequest } = __nccwpck_require__(463);
+const env = process.env;
 
 // Check if version is not of form v0.0.0 or 0.0.0
 function isDeletableVersion(version) {
@@ -166,13 +167,13 @@ async function getPackageNames(owner, repo, package_type, token) {
 
 async function run() {
     const org = core.getInput("ORG");
-    var owner = core.getInput("OWNER");
-    const repo = core.getInput("REPO");
     const package_type = core.getInput("PACKAGE_TYPE");
     const token = core.getInput("TOKEN");
-    const noOfDays = core.getInput("OLDER_THAN_NUMBER_OF_DAYS");
+    var noOfDays = core.getInput("OLDER_THAN_NUMBER_OF_DAYS");
+    const owner = env.GITHUB_REPOSITORY.split("/")[0];
+    const repo = env.GITHUB_REPOSITORY.split("/")[1];
 
-    if (!Number.isInteger(noOfDays)) {
+    if (!Number.isInteger((Number(noOfDays))) || noOfDays == "") {
         core.setFailed(`noOfDays ${noOfDays} should be a valid integer`)
         return
     }

@@ -4,8 +4,16 @@
     "description": "A GitHub Action that enables to clean up older package versions",
     "main": "index.js",
     "scripts": {},
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/gps/clean-up-gh-packages.git"
+    },
     "keywords": [],
-    "author": "",
+    "author": "Gopal Sharma <gps@surya-soft.com>",
+    "bugs": {
+        "url": "https://github.com/gps/clean-up-gh-packages/issues"
+    },
+    "homepage": "https://github.com/gps/clean-up-gh-packages#readme",
     "dependencies": {
         "@actions/core": "^1.2.6",
         "@octokit/core": "^3.3.1",

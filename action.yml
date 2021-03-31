@@ -1,18 +1,10 @@
 name: 'Clean up package versions'
 description: 'Clean up old package versions'
+author: 'Gopal Sharma <gps@surya-soft.com>'
 inputs:
   ORG:
     description: Name of the organisation. If ORG is not given, package will be considered to belong to a user.
     required: false
-  OWNER:
-    description: >
-      Name of the owner of the repository.
-      To delete a that package is published by a user and doesn't belong to an organisation,
-      this value value should be set. Both ORG and OWNER cannot be empty.
-    required: false
-  REPO:
-    description: Name of the repository from where the package was published.
-    required: true
   PACKAGE_TYPE:
     description: Type of supported package. Can be one of npm, maven, rubygems, nuget, docker, or container.
     required: true

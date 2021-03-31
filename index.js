@@ -2,6 +2,7 @@ const { Octokit } = require("@octokit/core");
 const core = require("@actions/core");
 const { request } = require("@octokit/request");
 const { withCustomRequest } = require("@octokit/graphql");
+const env = process.env;
 
 // Check if version is not of form v0.0.0 or 0.0.0
 function isDeletableVersion(version) {
@@ -159,13 +160,13 @@ async function getPackageNames(owner, repo, package_type, token) {
 
 async function run() {
     const org = core.getInput("ORG");
-    var owner = core.getInput("OWNER");
-    const repo = core.getInput("REPO");
     const package_type = core.getInput("PACKAGE_TYPE");
     const token = core.getInput("TOKEN");
-    const noOfDays = core.getInput("OLDER_THAN_NUMBER_OF_DAYS");
+    var noOfDays = core.getInput("OLDER_THAN_NUMBER_OF_DAYS");
+    const owner = env.GITHUB_REPOSITORY.split("/")[0];
+    const repo = env.GITHUB_REPOSITORY.split("/")[1];
 
-    if (!Number.isInteger(noOfDays)) {
+    if (!Number.isInteger((Number(noOfDays))) || noOfDays == "") {
         core.setFailed(`noOfDays ${noOfDays} should be a valid integer`)
         return
     }
@@ -173,22 +174,6 @@ async function run() {
     if (noOfDays < 1) {
         core.setFailed(`noOfDays ${noOfDays} cannot be less than 1`)
         return
-    }
-
-    if (org != null && org != "" && owner != null && owner != "") {
-        if (org != owner) {
-            core.setFailed(`ORG and OWNER cannot have different values`);
-            return;
-        }
-    }
-
-    if ((org == null || org == "") && (owner == null || owner == "")) {
-        core.setFailed(`both ORG and OWNER cannot be empty`);
-        return;
-    }
-
-    if ((owner == null || owner == "") && org != null && org != "") {
-        owner = org;
     }
 
     var packageNames = await getPackageNames(owner, repo, package_type, token)
