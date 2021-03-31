@@ -8,6 +8,8 @@
     "author": "",
     "dependencies": {
         "@actions/core": "^1.2.6",
-        "@octokit/core": "^3.3.1"
+        "@octokit/core": "^3.3.1",
+        "@octokit/graphql": "^4.6.1",
+        "@octokit/request": "^5.4.14"
     }
 }

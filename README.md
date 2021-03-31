@@ -7,17 +7,20 @@ A GitHub Action that cleans up old version of packages published to GitHub Packa
 
 Name of the organisation in which the github package was published. If org is not given, package will be considered to belong to a user.
 
+### `OWNER`
+
+Name of the owner of the repository. To delete a that package is published by a user and doesn't belong to an organisation,
+this value value should be set. Both ORG and OWNER cannot be empty.
+
+### `REPO`
+
+Name of the repository from where the package was published.
+
 **Required**
 
 ### `PACKAGE_TYPE`
 
 The type of supported package. Can be one of npm, maven, rubygems, nuget, docker, or container.
-
-**Required**
-
-### `PACKAGE_NAME`
-
-Name of the package.
 
 **Required**
 
@@ -39,9 +42,9 @@ Auth token with delete permission.
 - name: Clean up packages
   uses: gps/clean-up-gh-packages@master
   with:
-    ORG: ORG
+    ORG: {{ORG_NAME}}
+    REPO: {{REPO_NAME}}
     PACKAGE_TYPE: npm
-    PACKAGE_NAME: package
     OLDER_THAN_NUMBER_OF_DAYS: 30
     TOKEN: ${{ secrets.TEST_PACKAGE__RELEASE_DELETE_KEY }}
 ```
@@ -50,8 +53,9 @@ Auth token with delete permission.
 - name: Clean up packages
   uses: gps/clean-up-gh-packages@master
   with:
+    OWNER: {{OWNER_NAME}}
+    REPO: {{REPO_NAME}}
     PACKAGE_TYPE: npm
-    PACKAGE_NAME: package
     OLDER_THAN_NUMBER_OF_DAYS: 30
     TOKEN: ${{ secrets.TEST_PACKAGE__RELEASE_DELETE_KEY }}
 ```
@@ -74,8 +78,9 @@ jobs:
       - name: clean up packages
         uses: gps/clean-up-gh-packages@master
         with:
+          ORG: {{ORG_NAME}}
+          REPO: {{REPO_NAME}}
           PACKAGE_TYPE: npm
-          PACKAGE_NAME: package
           OLDER_THAN_NUMBER_OF_DAYS: ${{ github.event.inputs.noOfDays }}
           TOKEN: ${{ secrets.TEST_PACKAGE__RELEASE_DELETE_KEY }}
 ```

@@ -7,7 +7,8 @@ module.exports =
 
 const { Octokit } = __nccwpck_require__(461);
 const core = __nccwpck_require__(127);
-const { Console } = __nccwpck_require__(82);
+const { request } = __nccwpck_require__(986);
+const { withCustomRequest } = __nccwpck_require__(463);
 
 // Check if version is not of form v0.0.0 or 0.0.0
 function isDeletableVersion(version) {
@@ -65,6 +66,7 @@ async function findAndDeletePackageVersions(org, package_type, package_name, noO
     // Handle error
     octokit.hook.error("request", async (error, options) => {
         core.setFailed(error.message);
+        return;
     });
 
     if (org === null || org === "") {
@@ -94,6 +96,7 @@ async function deletePackageVersion(org, package_type, package_name, version, ve
         if (error != null) {
             console.log(`Unable to delete version ${version}. Error: ${error}`)
             core.setFailed(error);
+            return;
         }
     });
 
@@ -113,21 +116,92 @@ async function deletePackageVersion(org, package_type, package_name, version, ve
     }
 }
 
+// getPackageNames searches packages for a given repo and returns the list of package names.
+async function getPackageNames(owner, repo, package_type, token) {
+    const query = `query {
+        repository(owner: "${owner}", name: "${repo}") {
+          name
+          packages(first: 20, packageType: ${package_type.toUpperCase()}) {
+            totalCount,
+            nodes {
+              name,
+              id
+            }
+          }
+        }
+    }`;
+
+    let requestCounter = 0;
+    const myRequest = request.defaults({
+        headers: {
+            authorization: `token ${token}`,
+        },
+        request: {
+          hook(request, options) {
+            requestCounter++;
+            return request(options);
+          },
+        },
+    });
+
+    try {
+        const myGraphql = withCustomRequest(myRequest);
+        const result = await myGraphql(query);
+
+        if (result.repository.packages.nodes == null) {
+            console.log(`No packages found in the org`);
+            return
+        }
+        var packageNames = [];
+        const packages = result.repository.packages.nodes;
+        for(i = 0; i < packages.length; i++) {
+            packageNames.push(packages[i].name)
+        }
+        return packageNames;
+    } catch (error) {
+        core.setFailed(error);
+        return;
+    }
+}
+
 async function run() {
     const org = core.getInput("ORG");
+    var owner = core.getInput("OWNER");
+    const repo = core.getInput("REPO");
     const package_type = core.getInput("PACKAGE_TYPE");
-    const package_name = core.getInput("PACKAGE_NAME");
     const token = core.getInput("TOKEN");
     const noOfDays = core.getInput("OLDER_THAN_NUMBER_OF_DAYS");
 
     if (!Number.isInteger(noOfDays)) {
         core.setFailed(`noOfDays ${noOfDays} should be a valid integer`)
-    }
-    if (noOfDays < 1) {
-        core.setFailed(`noOfDays ${noOfDays} cannot be less than 1`)
+        return
     }
 
-    findAndDeletePackageVersions(org, package_type, package_name, noOfDays, token);
+    if (noOfDays < 1) {
+        core.setFailed(`noOfDays ${noOfDays} cannot be less than 1`)
+        return
+    }
+
+    if (org != null && org != "" && owner != null && owner != "") {
+        if (org != owner) {
+            core.setFailed(`ORG and OWNER cannot have different values`);
+            return;
+        }
+    }
+
+    if ((org == null || org == "") && (owner == null || owner == "")) {
+        core.setFailed(`both ORG and OWNER cannot be empty`);
+        return;
+    }
+
+    if ((owner == null || owner == "") && org != null && org != "") {
+        owner = org;
+    }
+
+    var packageNames = await getPackageNames(owner, repo, package_type, token)
+    for (i = 0; i< packageNames.length; i++) {
+        findAndDeletePackageVersions(org, package_type, packageNames[i], noOfDays, token);
+    }
 }
 
 run();
@@ -3537,14 +3611,6 @@ function wrappy (fn, cb) {
 
 module.exports = eval("require")("encoding");
 
-
-/***/ }),
-
-/***/ 82:
-/***/ ((module) => {
-
-"use strict";
-module.exports = require("console");;
 
 /***/ }),
 
