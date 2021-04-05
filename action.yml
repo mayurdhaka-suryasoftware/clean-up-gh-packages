@@ -1,0 +1,19 @@
+name: 'Clean up package versions'
+description: 'Clean up old package versions'
+author: 'Gopal Sharma <gps@surya-soft.com>'
+inputs:
+  ORG:
+    description: Name of the organisation. If ORG is not given, package will be considered to belong to a user.
+    required: false
+  PACKAGE_TYPE:
+    description: Type of supported package. Can be one of npm, maven, rubygems, nuget, docker, or container.
+    required: true
+  TOKEN:
+    description: Auth token with delete permission.
+    required: true
+  OLDER_THAN_NUMBER_OF_DAYS:
+    description: Packages older than OLDER_THAN_NUMBER_OF_DAYS will be deleted.
+    required: true
+runs:
+  using: node12
+  main: 'dist/index.js'
