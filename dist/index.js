@@ -2,13 +2,13 @@ module.exports =
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 456:
+/***/ 932:
 /***/ ((__unused_webpack_module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const { Octokit } = __nccwpck_require__(461);
-const core = __nccwpck_require__(127);
-const { request } = __nccwpck_require__(986);
-const { withCustomRequest } = __nccwpck_require__(463);
+const { Octokit } = __nccwpck_require__(762);
+const core = __nccwpck_require__(186);
+const { request } = __nccwpck_require__(234);
+const { withCustomRequest } = __nccwpck_require__(668);
 const env = process.env;
 
 // Check if version is not of form v0.0.0 or 0.0.0
@@ -22,12 +22,11 @@ function isDeletableVersion(version) {
 }
 
 function isOlderThanNumberOfDays(package, noOfDays) {
-    const updatedDate = new Date(package.updated_at);
+    const createdDate = new Date(package.created_at);
     const today = new Date();
-    var time_difference = today.getTime() - updatedDate.getTime();  
+    var time_difference = today.getTime() - createdDate.getTime();  
     //calculate days difference by dividing total milliseconds in a day  
     var days_difference = time_difference / (1000 * 60 * 60 * 24);  
-
     if (days_difference > noOfDays) {
         return true
     }
@@ -44,59 +43,20 @@ function getPackagesToBeDeleted(packages, noOfDays)  {
     return result
 }
 
-async function findAndDeletePackageVersions(org, package_type, package_name, noOfDays, token) {
-    const octokit = new Octokit({ auth: token });
-
-    // Handle response
-    octokit.hook.after("request", async (response, options) => {
-        if (response.data.length < 1) {
-            console.log(`Package ${package_name} doesn't contain any version.`)
-            return
-        }
-        var packages = getPackagesToBeDeleted(response.data, noOfDays)
-        console.log(`packages to be deleted: ${packages}`);
-        if (packages.length < 1) {
-            console.log(`Package ${package_name} doesn't contain any version older than ${noOfDays} days.`)
-            return
-        }
-        for (var i=0; i < packages.length; i++) {
-            deletePackageVersion(org, package_type, package_name, packages[i].name,  packages[i].id, token);
-        }
-    });
-
-    // Handle error
-    octokit.hook.error("request", async (error, options) => {
-        core.setFailed(error.message);
-        return;
-    });
-
-    if (org === null || org === "") {
-        await octokit.request('GET /user/packages/{package_type}/{package_name}/versions', {
-            package_type: package_type,
-            package_name: package_name
-        });
-    } else {
-        await octokit.request('GET /orgs/{org}/packages/{package_type}/{package_name}/versions', {
-            org: org,
-            package_type: package_type,
-            package_name: package_name
-        });
-    }
-}
-
 async function deletePackageVersion(org, package_type, package_name, version, version_id, token) {
     const octokit = new Octokit({ auth: token });
 
     // Handle response
     octokit.hook.after("request", async (response, options) => {
-        console.log(`Deleted version ${version} successfully`);
+        console.log(`${package_name}: Deleted package version ${version} successfully`);
     });
 
     // Handle error
     octokit.hook.error("request", async (error, options) => {
         if (error != null) {
             console.log(`Unable to delete version ${version}. Error: ${error}`)
-            core.setFailed(error);
+            core.warning(error);
+            process.exit(0);
             return;
         }
     });
@@ -117,52 +77,94 @@ async function deletePackageVersion(org, package_type, package_name, version, ve
     }
 }
 
+async function findDeletablePackageVersions(org, package_type, package_name, noOfDays, token, page, deletablePackages) {
+    const octokit = new Octokit({ auth: token });
+    octokit.hook.after("request", async (response, options) => {
+        if (response.data && response.data.length > 0) {
+            var packages = getPackagesToBeDeleted(response.data, noOfDays);
+            deletablePackages.push(...packages);
+            page = ++page;
+            await findDeletablePackageVersions(org, package_type, package_name, noOfDays, token, page, deletablePackages);
+        } else {
+            return;
+        }
+    });
+    
+    // Handle error
+    octokit.hook.error("request", async (error, options) => {
+        core.setFailed(error.message);
+        process.exit(0);
+    });
+    
+    if (org === null || org === "") {
+        await octokit.request('GET /user/packages/{package_type}/{package_name}/versions?page_limit=99&page={page}', {
+            package_type: package_type,
+            package_name: package_name,
+            page: page
+        });
+    } else {
+        await octokit.request('GET /orgs/{org}/packages/{package_type}/{package_name}/versions?page_limit=99&page={page}', {
+            org: org,
+            package_type: package_type,
+            package_name: package_name,
+            page: page
+        });
+    }
+}
+
 // getPackageNames searches packages for a given repo and returns the list of package names.
 async function getPackageNames(owner, repo, package_type, token) {
-    const query = `query {
-        repository(owner: "${owner}", name: "${repo}") {
-          name
-          packages(first: 20, packageType: ${package_type.toUpperCase()}) {
-            totalCount,
-            nodes {
-              name,
-              id
+    var packages = []
+    let continuePagination = false
+    let afterId = ""
+    do {
+        const query = `query {
+            repository(owner: "${owner}", name: "${repo}") {
+              name
+              packages(first: 20, after: "${afterId}", packageType: ${package_type.toUpperCase()}) {
+                totalCount
+                nodes {
+                  name
+                  id
+                }
+                pageInfo {
+                    endCursor
+                    hasNextPage
+                }
+              }
             }
-          }
+        }`;
+        try {
+            const myRequest = request.defaults({
+                headers: {
+                    authorization: `token ${token}`,
+                },
+                request: {
+                  hook(request, options) {
+                    return request(options);
+                  },
+                },
+            });
+            const myGraphql = withCustomRequest(myRequest);
+            const result = await myGraphql(query);
+            if (result.repository.packages.nodes == null) {
+                console.log(`No packages found in the org`);
+                return
+            }
+            packages.push(...result.repository.packages.nodes);
+            continuePagination = result.repository.packages.pageInfo.hasNextPage;
+            afterId = result.repository.packages.pageInfo.endCursor;
+        } catch (error) {
+            core.setFailed(error);
+            return;
         }
-    }`;
+    } while(continuePagination)
 
-    let requestCounter = 0;
-    const myRequest = request.defaults({
-        headers: {
-            authorization: `token ${token}`,
-        },
-        request: {
-          hook(request, options) {
-            requestCounter++;
-            return request(options);
-          },
-        },
-    });
-
-    try {
-        const myGraphql = withCustomRequest(myRequest);
-        const result = await myGraphql(query);
-
-        if (result.repository.packages.nodes == null) {
-            console.log(`No packages found in the org`);
-            return
-        }
-        var packageNames = [];
-        const packages = result.repository.packages.nodes;
-        for(i = 0; i < packages.length; i++) {
-            packageNames.push(packages[i].name)
-        }
-        return packageNames;
-    } catch (error) {
-        core.setFailed(error);
-        return;
+    var packageNames = [];
+    for(i = 0; i < packages.length; i++) {
+        packageNames.push(packages[i].name)
     }
+    return packageNames;
 }
 
 async function run() {
@@ -183,25 +185,13 @@ async function run() {
         return
     }
 
-    if (org != null && org != "" && owner != null && owner != "") {
-        if (org != owner) {
-            core.setFailed(`ORG and OWNER cannot have different values`);
-            return;
-        }
-    }
-
-    if ((org == null || org == "") && (owner == null || owner == "")) {
-        core.setFailed(`both ORG and OWNER cannot be empty`);
-        return;
-    }
-
-    if ((owner == null || owner == "") && org != null && org != "") {
-        owner = org;
-    }
-
     var packageNames = await getPackageNames(owner, repo, package_type, token)
     for (i = 0; i< packageNames.length; i++) {
-        findAndDeletePackageVersions(org, package_type, packageNames[i], noOfDays, token);
+        var deletablePackages = [];
+        await findDeletablePackageVersions(org, package_type, packageNames[i], noOfDays, token, 1 ,deletablePackages); 
+        for (var j=0; j < deletablePackages.length; j++) {
+            await deletePackageVersion(org, package_type, packageNames[i], deletablePackages[j].name,  deletablePackages[j].id, token);
+        }
     }
 }
 
@@ -210,7 +200,7 @@ run();
 
 /***/ }),
 
-/***/ 604:
+/***/ 351:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -224,7 +214,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const os = __importStar(__nccwpck_require__(87));
-const utils_1 = __nccwpck_require__(245);
+const utils_1 = __nccwpck_require__(278);
 /**
  * Commands
  *
@@ -296,7 +286,7 @@ function escapeProperty(s) {
 
 /***/ }),
 
-/***/ 127:
+/***/ 186:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -318,9 +308,9 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-const command_1 = __nccwpck_require__(604);
-const file_command_1 = __nccwpck_require__(352);
-const utils_1 = __nccwpck_require__(245);
+const command_1 = __nccwpck_require__(351);
+const file_command_1 = __nccwpck_require__(717);
+const utils_1 = __nccwpck_require__(278);
 const os = __importStar(__nccwpck_require__(87));
 const path = __importStar(__nccwpck_require__(622));
 /**
@@ -541,7 +531,7 @@ exports.getState = getState;
 
 /***/ }),
 
-/***/ 352:
+/***/ 717:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -559,7 +549,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const fs = __importStar(__nccwpck_require__(747));
 const os = __importStar(__nccwpck_require__(87));
-const utils_1 = __nccwpck_require__(245);
+const utils_1 = __nccwpck_require__(278);
 function issueCommand(command, message) {
     const filePath = process.env[`GITHUB_${command}`];
     if (!filePath) {
@@ -577,7 +567,7 @@ exports.issueCommand = issueCommand;
 
 /***/ }),
 
-/***/ 245:
+/***/ 278:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -603,7 +593,7 @@ exports.toCommandValue = toCommandValue;
 
 /***/ }),
 
-/***/ 426:
+/***/ 334:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -660,7 +650,7 @@ exports.createTokenAuth = createTokenAuth;
 
 /***/ }),
 
-/***/ 461:
+/***/ 762:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -668,11 +658,11 @@ exports.createTokenAuth = createTokenAuth;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 
-var universalUserAgent = __nccwpck_require__(81);
-var beforeAfterHook = __nccwpck_require__(108);
-var request = __nccwpck_require__(986);
-var graphql = __nccwpck_require__(463);
-var authToken = __nccwpck_require__(426);
+var universalUserAgent = __nccwpck_require__(30);
+var beforeAfterHook = __nccwpck_require__(682);
+var request = __nccwpck_require__(234);
+var graphql = __nccwpck_require__(668);
+var authToken = __nccwpck_require__(334);
 
 function _objectWithoutPropertiesLoose(source, excluded) {
   if (source == null) return {};
@@ -843,7 +833,7 @@ exports.Octokit = Octokit;
 
 /***/ }),
 
-/***/ 995:
+/***/ 440:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -851,8 +841,8 @@ exports.Octokit = Octokit;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 
-var isPlainObject = __nccwpck_require__(32);
-var universalUserAgent = __nccwpck_require__(81);
+var isPlainObject = __nccwpck_require__(287);
+var universalUserAgent = __nccwpck_require__(30);
 
 function lowercaseKeys(object) {
   if (!object) {
@@ -1241,7 +1231,7 @@ exports.endpoint = endpoint;
 
 /***/ }),
 
-/***/ 463:
+/***/ 668:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -1249,8 +1239,8 @@ exports.endpoint = endpoint;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 
-var request = __nccwpck_require__(986);
-var universalUserAgent = __nccwpck_require__(81);
+var request = __nccwpck_require__(234);
+var universalUserAgent = __nccwpck_require__(30);
 
 const VERSION = "4.6.1";
 
@@ -1365,7 +1355,7 @@ exports.withCustomRequest = withCustomRequest;
 
 /***/ }),
 
-/***/ 190:
+/***/ 537:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -1375,8 +1365,8 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
 
-var deprecation = __nccwpck_require__(800);
-var once = _interopDefault(__nccwpck_require__(666));
+var deprecation = __nccwpck_require__(481);
+var once = _interopDefault(__nccwpck_require__(223));
 
 const logOnce = once(deprecation => console.warn(deprecation));
 /**
@@ -1428,7 +1418,7 @@ exports.RequestError = RequestError;
 
 /***/ }),
 
-/***/ 986:
+/***/ 234:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -1438,11 +1428,11 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
 
-var endpoint = __nccwpck_require__(995);
-var universalUserAgent = __nccwpck_require__(81);
-var isPlainObject = __nccwpck_require__(32);
-var nodeFetch = _interopDefault(__nccwpck_require__(534));
-var requestError = __nccwpck_require__(190);
+var endpoint = __nccwpck_require__(440);
+var universalUserAgent = __nccwpck_require__(30);
+var isPlainObject = __nccwpck_require__(287);
+var nodeFetch = _interopDefault(__nccwpck_require__(467));
+var requestError = __nccwpck_require__(537);
 
 const VERSION = "5.4.14";
 
@@ -1584,12 +1574,12 @@ exports.request = request;
 
 /***/ }),
 
-/***/ 108:
+/***/ 682:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-var register = __nccwpck_require__(676)
-var addHook = __nccwpck_require__(862)
-var removeHook = __nccwpck_require__(704)
+var register = __nccwpck_require__(670)
+var addHook = __nccwpck_require__(549)
+var removeHook = __nccwpck_require__(819)
 
 // bind with array of arguments: https://stackoverflow.com/a/21792913
 var bind = Function.bind
@@ -1648,7 +1638,7 @@ module.exports.Collection = Hook.Collection
 
 /***/ }),
 
-/***/ 862:
+/***/ 549:
 /***/ ((module) => {
 
 module.exports = addHook;
@@ -1701,7 +1691,7 @@ function addHook(state, kind, name, hook) {
 
 /***/ }),
 
-/***/ 676:
+/***/ 670:
 /***/ ((module) => {
 
 module.exports = register;
@@ -1735,7 +1725,7 @@ function register(state, name, method, options) {
 
 /***/ }),
 
-/***/ 704:
+/***/ 819:
 /***/ ((module) => {
 
 module.exports = removeHook;
@@ -1761,7 +1751,7 @@ function removeHook(state, name, method) {
 
 /***/ }),
 
-/***/ 800:
+/***/ 481:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -1789,7 +1779,7 @@ exports.Deprecation = Deprecation;
 
 /***/ }),
 
-/***/ 32:
+/***/ 287:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -1835,7 +1825,7 @@ exports.isPlainObject = isPlainObject;
 
 /***/ }),
 
-/***/ 534:
+/***/ 467:
 /***/ ((module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -2000,7 +1990,7 @@ FetchError.prototype.name = 'FetchError';
 
 let convert;
 try {
-	convert = __nccwpck_require__(431).convert;
+	convert = __nccwpck_require__(877).convert;
 } catch (e) {}
 
 const INTERNALS = Symbol('Body internals');
@@ -3492,10 +3482,10 @@ exports.FetchError = FetchError;
 
 /***/ }),
 
-/***/ 666:
+/***/ 223:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-var wrappy = __nccwpck_require__(2)
+var wrappy = __nccwpck_require__(940)
 module.exports = wrappy(once)
 module.exports.strict = wrappy(onceStrict)
 
@@ -3541,7 +3531,7 @@ function onceStrict (fn) {
 
 /***/ }),
 
-/***/ 81:
+/***/ 30:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -3567,7 +3557,7 @@ exports.getUserAgent = getUserAgent;
 
 /***/ }),
 
-/***/ 2:
+/***/ 940:
 /***/ ((module) => {
 
 // Returns a wrapper function that returns a wrapped callback
@@ -3607,7 +3597,7 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
-/***/ 431:
+/***/ 877:
 /***/ ((module) => {
 
 module.exports = eval("require")("encoding");
@@ -3717,6 +3707,6 @@ module.exports = require("zlib");;
 /******/ 	// module exports must be returned from runtime so entry inlining is disabled
 /******/ 	// startup
 /******/ 	// Load entry module and return exports
-/******/ 	return __nccwpck_require__(456);
+/******/ 	return __nccwpck_require__(932);
 /******/ })()
 ;

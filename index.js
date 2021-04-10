@@ -15,12 +15,11 @@ function isDeletableVersion(version) {
 }
 
 function isOlderThanNumberOfDays(package, noOfDays) {
-    const updatedDate = new Date(package.updated_at);
+    const createdDate = new Date(package.created_at);
     const today = new Date();
-    var time_difference = today.getTime() - updatedDate.getTime();  
+    var time_difference = today.getTime() - createdDate.getTime();  
     //calculate days difference by dividing total milliseconds in a day  
     var days_difference = time_difference / (1000 * 60 * 60 * 24);  
-
     if (days_difference > noOfDays) {
         return true
     }
@@ -37,59 +36,20 @@ function getPackagesToBeDeleted(packages, noOfDays)  {
     return result
 }
 
-async function findAndDeletePackageVersions(org, package_type, package_name, noOfDays, token) {
-    const octokit = new Octokit({ auth: token });
-
-    // Handle response
-    octokit.hook.after("request", async (response, options) => {
-        if (response.data.length < 1) {
-            console.log(`Package ${package_name} doesn't contain any version.`)
-            return
-        }
-        var packages = getPackagesToBeDeleted(response.data, noOfDays)
-        console.log(`packages to be deleted: ${packages}`);
-        if (packages.length < 1) {
-            console.log(`Package ${package_name} doesn't contain any version older than ${noOfDays} days.`)
-            return
-        }
-        for (var i=0; i < packages.length; i++) {
-            deletePackageVersion(org, package_type, package_name, packages[i].name,  packages[i].id, token);
-        }
-    });
-
-    // Handle error
-    octokit.hook.error("request", async (error, options) => {
-        core.setFailed(error.message);
-        return;
-    });
-
-    if (org === null || org === "") {
-        await octokit.request('GET /user/packages/{package_type}/{package_name}/versions', {
-            package_type: package_type,
-            package_name: package_name
-        });
-    } else {
-        await octokit.request('GET /orgs/{org}/packages/{package_type}/{package_name}/versions', {
-            org: org,
-            package_type: package_type,
-            package_name: package_name
-        });
-    }
-}
-
 async function deletePackageVersion(org, package_type, package_name, version, version_id, token) {
     const octokit = new Octokit({ auth: token });
 
     // Handle response
     octokit.hook.after("request", async (response, options) => {
-        console.log(`Deleted version ${version} successfully`);
+        console.log(`${package_name}: Deleted package version ${version} successfully`);
     });
 
     // Handle error
     octokit.hook.error("request", async (error, options) => {
         if (error != null) {
             console.log(`Unable to delete version ${version}. Error: ${error}`)
-            core.setFailed(error);
+            core.warning(error);
+            process.exit(0);
             return;
         }
     });
@@ -110,52 +70,94 @@ async function deletePackageVersion(org, package_type, package_name, version, ve
     }
 }
 
+async function findDeletablePackageVersions(org, package_type, package_name, noOfDays, token, page, deletablePackages) {
+    const octokit = new Octokit({ auth: token });
+    octokit.hook.after("request", async (response, options) => {
+        if (response.data && response.data.length > 0) {
+            var packages = getPackagesToBeDeleted(response.data, noOfDays);
+            deletablePackages.push(...packages);
+            page = ++page;
+            await findDeletablePackageVersions(org, package_type, package_name, noOfDays, token, page, deletablePackages);
+        } else {
+            return;
+        }
+    });
+    
+    // Handle error
+    octokit.hook.error("request", async (error, options) => {
+        core.setFailed(error.message);
+        process.exit(0);
+    });
+    
+    if (org === null || org === "") {
+        await octokit.request('GET /user/packages/{package_type}/{package_name}/versions?page_limit=99&page={page}', {
+            package_type: package_type,
+            package_name: package_name,
+            page: page
+        });
+    } else {
+        await octokit.request('GET /orgs/{org}/packages/{package_type}/{package_name}/versions?page_limit=99&page={page}', {
+            org: org,
+            package_type: package_type,
+            package_name: package_name,
+            page: page
+        });
+    }
+}
+
 // getPackageNames searches packages for a given repo and returns the list of package names.
 async function getPackageNames(owner, repo, package_type, token) {
-    const query = `query {
-        repository(owner: "${owner}", name: "${repo}") {
-          name
-          packages(first: 20, packageType: ${package_type.toUpperCase()}) {
-            totalCount,
-            nodes {
-              name,
-              id
+    var packages = []
+    let continuePagination = false
+    let afterId = ""
+    do {
+        const query = `query {
+            repository(owner: "${owner}", name: "${repo}") {
+              name
+              packages(first: 20, after: "${afterId}", packageType: ${package_type.toUpperCase()}) {
+                totalCount
+                nodes {
+                  name
+                  id
+                }
+                pageInfo {
+                    endCursor
+                    hasNextPage
+                }
+              }
             }
-          }
+        }`;
+        try {
+            const myRequest = request.defaults({
+                headers: {
+                    authorization: `token ${token}`,
+                },
+                request: {
+                  hook(request, options) {
+                    return request(options);
+                  },
+                },
+            });
+            const myGraphql = withCustomRequest(myRequest);
+            const result = await myGraphql(query);
+            if (result.repository.packages.nodes == null) {
+                console.log(`No packages found in the org`);
+                return
+            }
+            packages.push(...result.repository.packages.nodes);
+            continuePagination = result.repository.packages.pageInfo.hasNextPage;
+            afterId = result.repository.packages.pageInfo.endCursor;
+        } catch (error) {
+            core.setFailed(error);
+            return;
         }
-    }`;
+    } while(continuePagination)
 
-    let requestCounter = 0;
-    const myRequest = request.defaults({
-        headers: {
-            authorization: `token ${token}`,
-        },
-        request: {
-          hook(request, options) {
-            requestCounter++;
-            return request(options);
-          },
-        },
-    });
-
-    try {
-        const myGraphql = withCustomRequest(myRequest);
-        const result = await myGraphql(query);
-
-        if (result.repository.packages.nodes == null) {
-            console.log(`No packages found in the org`);
-            return
-        }
-        var packageNames = [];
-        const packages = result.repository.packages.nodes;
-        for(i = 0; i < packages.length; i++) {
-            packageNames.push(packages[i].name)
-        }
-        return packageNames;
-    } catch (error) {
-        core.setFailed(error);
-        return;
+    var packageNames = [];
+    for(i = 0; i < packages.length; i++) {
+        packageNames.push(packages[i].name)
     }
+    return packageNames;
 }
 
 async function run() {
@@ -178,7 +180,11 @@ async function run() {
 
     var packageNames = await getPackageNames(owner, repo, package_type, token)
     for (i = 0; i< packageNames.length; i++) {
-        findAndDeletePackageVersions(org, package_type, packageNames[i], noOfDays, token);
+        var deletablePackages = [];
+        await findDeletablePackageVersions(org, package_type, packageNames[i], noOfDays, token, 1 ,deletablePackages); 
+        for (var j=0; j < deletablePackages.length; j++) {
+            await deletePackageVersion(org, package_type, packageNames[i], deletablePackages[j].name,  deletablePackages[j].id, token);
+        }
     }
 }
 
