@@ -6,11 +6,11 @@ const env = process.env;
 
 // Check if version is not of form v0.0.0 or 0.0.0
 function isDeletableVersion(version) {
-    var releasePattern = /[v]?[0-9]+\.[0-9]+\.[0-9]+/g;
-    var result = version.match(releasePattern);
-    if (result != null && result == version) {
-        return false
-    }
+    // var releasePattern = /[v]?[0-9]+\.[0-9]+\.[0-9]+/g;
+    // var result = version.match(releasePattern);
+    // if (result != null && result == version) {
+    //     return false
+    // }
     return true
 }
 
