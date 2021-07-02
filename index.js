@@ -33,6 +33,8 @@ function getPackagesToBeDeleted(packages, noOfDays)  {
             result.push(packages[i]);
         }
     }
+    print("packages to be deleted");
+    print(result);
     return result
 }
 
@@ -53,6 +55,8 @@ async function deletePackageVersion(org, package_type, package_name, version, ve
             return;
         }
     });
+
+    print("Deleting {package_name}, {version_id}");
 
     if (org === null || org === "") {
         await octokit.request('DELETE /user/packages/{package_type}/{package_name}/versions/{version_id}', {
